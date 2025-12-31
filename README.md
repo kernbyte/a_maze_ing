@@ -18,6 +18,7 @@ The maze generation logic is reusable via the single-file module `mazegen.py`.
   - `make debug`
   - `make clean`
   - `make lint`
+  - `make lint-strict`
 
 ## Configuration
 The config file is plain text with one `KEY=VALUE` per line.
