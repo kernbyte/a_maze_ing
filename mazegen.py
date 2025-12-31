@@ -10,8 +10,10 @@ Basic usage:
     grid = gen.grid
     path = gen.solve_shortest_path((0, 0), (14, 19))
 
-The maze is stored as a 2D list of `Cell` instances (`grid[row][col]`). Each `Cell`
-has a `walls` mapping with keys: "N", "E", "S", "W" where True means closed.
+The maze is stored as a 2D list of `Cell` instances
+(`grid[row][col]`).
+Each `Cell` has a `walls` mapping with keys: "N", "E", "S", "W".
+True means closed.
 """
 
 from collections import deque
@@ -50,8 +52,8 @@ class Cell:
 class MazeGenerator:
     """Generate a maze grid, optionally embedding a visible "42" pattern.
 
-    The generated maze is perfect over all non-pattern cells (i.e., exactly one path
-    between any two reachable non-pattern cells).
+    The generated maze is perfect over all non-pattern cells (i.e., exactly one
+    path between any two reachable non-pattern cells).
     """
 
     width: int
@@ -85,7 +87,10 @@ class MazeGenerator:
 
         if embed_42:
             try:
-                self.pattern_cells = self._place_42_pattern(entry=entry, exit_=exit_)
+                self.pattern_cells = self._place_42_pattern(
+                    entry=entry,
+                    exit_=exit_,
+                )
             except ValueError as exc:
                 self.pattern_cells = set()
                 self.pattern_omitted_reason = str(exc)
@@ -113,10 +118,16 @@ class MazeGenerator:
             for c in range(self.width):
                 if (r, c) in self.pattern_cells:
                     continue
-                if r + 1 < self.height and (r + 1, c) not in self.pattern_cells:
+                if (
+                    r + 1 < self.height
+                    and (r + 1, c) not in self.pattern_cells
+                ):
                     if self.grid[r][c].walls["S"]:
                         candidates.append(((r, c), (r + 1, c)))
-                if c + 1 < self.width and (r, c + 1) not in self.pattern_cells:
+                if (
+                    c + 1 < self.width
+                    and (r, c + 1) not in self.pattern_cells
+                ):
                     if self.grid[r][c].walls["E"]:
                         candidates.append(((r, c), (r, c + 1)))
 
@@ -190,10 +201,20 @@ class MazeGenerator:
 
         for r in range(self.height):
             for c in range(self.width):
-                if (r, c) not in self.pattern_cells and not self.grid[r][c].visited:
-                    raise RuntimeError("Maze generation produced disconnected cells")
+                if (
+                    (r, c) not in self.pattern_cells
+                    and not self.grid[r][c].visited
+                ):
+                    raise RuntimeError(
+                        "Maze generation produced disconnected cells"
+                    )
 
-    def _place_42_pattern(self, *, entry: Optional[Coord], exit_: Optional[Coord]) -> Set[Coord]:
+    def _place_42_pattern(
+        self,
+        *,
+        entry: Optional[Coord],
+        exit_: Optional[Coord],
+    ) -> Set[Coord]:
         # Blocky 5x9 digits with a 1-column gap: total 11x9.
         # This matches the usual subject screenshot style.
         pattern_4 = [
@@ -232,7 +253,9 @@ class MazeGenerator:
         for r0 in range(1, self.height - ph):
             for c0 in range(1, self.width - pw):
                 starts.append((r0, c0))
-        starts.sort(key=lambda rc: abs(rc[0] - center_r) + abs(rc[1] - center_c))
+        starts.sort(
+            key=lambda rc: abs(rc[0] - center_r) + abs(rc[1] - center_c)
+        )
 
         if not starts:
             raise ValueError("Maze too small for 42 pattern")
@@ -261,12 +284,19 @@ class MazeGenerator:
             if ok:
                 return coords
 
-        raise ValueError("Could not place 42 pattern without overlapping entry/exit")
+        raise ValueError(
+            "Could not place 42 pattern without overlapping entry/exit"
+        )
 
-    def solve_shortest_path(self, entry: Coord, exit_: Coord) -> Optional[List[Coord]]:
+    def solve_shortest_path(
+        self,
+        entry: Coord,
+        exit_: Coord,
+    ) -> Optional[List[Coord]]:
         """Return the shortest path from entry to exit using BFS.
 
-        Returns a list of coordinates including both endpoints, or None if no path exists.
+        Returns a list of coordinates including both endpoints,
+        or None if no path exists.
         """
 
         if entry == exit_:

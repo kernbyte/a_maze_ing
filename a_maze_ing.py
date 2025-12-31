@@ -62,19 +62,22 @@ def parse_int(value: str, *, key: str) -> int:
     try:
         return int(value.strip())
     except ValueError as exc:
-        raise ConfigError(f"Invalid integer for {key}: {value!r}") from exc
+        msg = f"Invalid integer for {key}: {value!r}"
+        raise ConfigError(msg) from exc
 
 
 def parse_coord(value: str, *, key: str) -> Coord:
     """Parse coordinates as (x,y) and return internal (row,col).
 
-    The subject uses coordinates (x,y) where x is a column (0..WIDTH-1) and y is a
-    row (0..HEIGHT-1). Internally, this project uses (row,col).
+    The subject uses coordinates (x,y) where x is a column (0..WIDTH-1)
+    and y is a row (0..HEIGHT-1). Internally, this project uses (row,col).
     """
 
     parts = [p.strip() for p in value.split(",")]
     if len(parts) != 2:
-        raise ConfigError(f"Invalid coordinate for {key}: {value!r} (expected 'x,y')")
+        raise ConfigError(
+            f"Invalid coordinate for {key}: {value!r} (expected 'x,y')"
+        )
     x = parse_int(parts[0], key=key)
     y = parse_int(parts[1], key=key)
     return (y, x)
@@ -87,12 +90,16 @@ def read_config(path: Path) -> Config:
         raise ConfigError(f"Config file not found: {path}")
 
     raw: Dict[str, str] = {}
-    for line_no, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+    for line_no, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), start=1
+    ):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
         if "=" not in stripped:
-            raise ConfigError(f"Bad syntax at line {line_no}: {line!r} (expected KEY=VALUE)")
+            raise ConfigError(
+                f"Bad syntax at line {line_no}: {line!r} (expected KEY=VALUE)"
+            )
         k, v = stripped.split("=", 1)
         key = k.strip().upper()
         raw[key] = v.strip()
@@ -100,7 +107,9 @@ def read_config(path: Path) -> Config:
     required = {"WIDTH", "HEIGHT", "ENTRY", "EXIT", "OUTPUT_FILE", "PERFECT"}
     missing = sorted(required - set(raw.keys()))
     if missing:
-        raise ConfigError(f"Missing required config keys: {', '.join(missing)}")
+        raise ConfigError(
+            f"Missing required config keys: {', '.join(missing)}"
+        )
 
     width = parse_int(raw["WIDTH"], key="WIDTH")
     height = parse_int(raw["HEIGHT"], key="HEIGHT")
@@ -243,10 +252,12 @@ def validate_maze(
     if len(reachable) != total_open:
         raise RuntimeError("Invalid maze: disconnected cells exist")
 
-    # No fully open 3x3 areas (corridors can't be wider than 2 cells).
+    # No fully open 3x3 areas.
+    # Corridors can't be wider than 2 cells.
     for r0 in range(h - 2):
         for c0 in range(w - 2):
-            # If the 42 pattern intersects the block, it cannot be a fully open room.
+            # If the 42 pattern intersects the block, it cannot be
+            # a fully open room.
             skip = False
             for rr in range(r0, r0 + 3):
                 for cc in range(c0, c0 + 3):
@@ -285,16 +296,30 @@ def validate_maze(
                 if (r, c) in blocked:
                     continue
                 cell = grid[r][c]
-                if not cell.walls["E"] and c + 1 < w and (r, c + 1) not in blocked:
+                if (
+                    not cell.walls["E"]
+                    and c + 1 < w
+                    and (r, c + 1) not in blocked
+                ):
                     edges += 1
-                if not cell.walls["S"] and r + 1 < h and (r + 1, c) not in blocked:
+                if (
+                    not cell.walls["S"]
+                    and r + 1 < h
+                    and (r + 1, c) not in blocked
+                ):
                     edges += 1
         if edges != total_open - 1:
-            raise RuntimeError("Invalid maze: PERFECT=True but maze contains loops")
+            raise RuntimeError(
+                "Invalid maze: PERFECT=True but "
+                "maze contains loops"
+            )
 
 
 def neighbors_open(grid: Grid, x: int, y: int) -> Iterable[Coord]:
-    """Yield neighboring coordinates reachable from (row,col) through open walls."""
+    """Yield neighboring coordinates reachable from (row,col).
+
+    Uses open walls only.
+    """
     cell = grid[x][y]
 
     if not cell.walls["N"] and x - 1 >= 0:
@@ -376,7 +401,13 @@ def cell_to_hex(cell: _HasWalls) -> str:
     return format(val, "X")
 
 
-def write_output_file(path: Path, grid: Grid, entry: Coord, exit_: Coord, directions: str) -> None:
+def write_output_file(
+    path: Path,
+    grid: Grid,
+    entry: Coord,
+    exit_: Coord,
+    directions: str,
+) -> None:
     """Write the maze output file following the subject format."""
 
     lines: List[str] = []
@@ -407,7 +438,10 @@ def render_block(
 
     out_h = 2 * h + 1
     out_w = 2 * w + 1
-    canvas: List[List[str]] = [[WALL_CHAR for _ in range(out_w)] for _ in range(out_h)]
+    canvas: List[List[str]] = [
+        [WALL_CHAR for _ in range(out_w)]
+        for _ in range(out_h)
+    ]
 
     def set_at(r: int, c: int, ch: str) -> None:
         if 0 <= r < out_h and 0 <= c < out_w:
@@ -473,7 +507,10 @@ def curses_view(
         pattern_attr: int,
         bg_attr: int,
     ) -> None:
-        lines = render_block(cast(Grid, maze.grid), pattern=getattr(maze, "pattern_cells", None))
+        lines = render_block(
+            cast(Grid, maze.grid),
+            pattern=getattr(maze, "pattern_cells", None),
+        )
         max_y, max_x = stdscr.getmaxyx()
         needed_y = len(lines)
         needed_x = max((len(line) for line in lines), default=0)
@@ -512,16 +549,23 @@ def curses_view(
         wall_color_idx
         wall_foreground = wall_colors[wall_color_idx % len(wall_colors)]
         try:
-            curses.init_pair(1, wall_foreground, curses.COLOR_BLACK)  # walls
-            curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)  # path
-            curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_MAGENTA)  # entry
-            curses.init_pair(4, curses.COLOR_BLACK, curses.COLOR_RED)  # exit
+            # 1: walls
+            curses.init_pair(1, wall_foreground, curses.COLOR_BLACK)
+            # 2: path
+            curses.init_pair(2, curses.COLOR_BLACK, curses.COLOR_CYAN)
+            # 3: entry
+            curses.init_pair(3, curses.COLOR_BLACK, curses.COLOR_MAGENTA)
+            # 4: exit
+            curses.init_pair(4, curses.COLOR_BLACK, curses.COLOR_RED)
             pattern_bg = curses.COLOR_WHITE
             if getattr(curses, "COLORS", 0) >= 16:
-                # In most 16/256-color terminals, color 8 is a gray (bright black).
+                # In most 16/256-color terminals, color 8 is
+                # a gray (bright black).
                 pattern_bg = 8
-            curses.init_pair(5, curses.COLOR_BLACK, pattern_bg)  # 42 pattern
-            curses.init_pair(6, curses.COLOR_WHITE, curses.COLOR_BLACK)  # background/text
+            # 5: 42 pattern
+            curses.init_pair(5, curses.COLOR_BLACK, pattern_bg)
+            # 6: background/text
+            curses.init_pair(6, curses.COLOR_WHITE, curses.COLOR_BLACK)
         except curses.error:
             pass
         return (
@@ -531,7 +575,11 @@ def curses_view(
             curses.color_pair(4),
         )
 
-    def generate_new_maze() -> Tuple[MazeGenerator, Optional[List[Coord]], str]:
+    def generate_new_maze() -> Tuple[
+        MazeGenerator,
+        Optional[List[Coord]],
+        str,
+    ]:
         cell_count = config.width * config.height
         draw_every = max(1, cell_count // 250)
         delay_ms = 5 if cell_count <= 900 else 1
@@ -587,7 +635,13 @@ def curses_view(
             directions = ""
         else:
             directions = path_to_directions(path)
-        write_output_file(config.output_file, grid, config.entry, config.exit, directions)
+        write_output_file(
+            config.output_file,
+            grid,
+            config.entry,
+            config.exit,
+            directions,
+        )
         return maze, path, directions
 
     maze, path, _directions = generate_new_maze()
@@ -614,7 +668,10 @@ def curses_view(
                 path_tiles.add((br, bc))
                 path_tiles.add(((ar + br) // 2, (ac + bc) // 2))
 
-        lines = render_block(cast(Grid, maze.grid), pattern=getattr(maze, "pattern_cells", None))
+        lines = render_block(
+            cast(Grid, maze.grid),
+            pattern=getattr(maze, "pattern_cells", None),
+        )
         max_y, max_x = stdscr.getmaxyx()
 
         menu_lines = 6
@@ -645,8 +702,11 @@ def curses_view(
 
         if max_y < needed_y or max_x < needed_x:
             safe_addstr(0, 0, "Terminal too small.")
-            safe_addstr(1, 0, f"Need {needed_x}x{needed_y}, have {max_x}x{max_y}.")
-            safe_addstr(3, 0, "Resize and press 3 to quit.")
+            need_msg = (
+                f"Need {needed_x}x{needed_y}, have {max_x}x{max_y}."
+            )
+            safe_addstr(1, 0, need_msg)
+            safe_addstr(3, 0, "Resize or press 3 to quit.")
             stdscr.refresh()
             keycode = stdscr.getch()
             if keycode == ord("3"):
@@ -708,7 +768,8 @@ def curses_view(
 
 
 def run(config: Config) -> int:
-    """Generate the maze, write the output file, then show the interactive view."""
+    """Generate the maze, write the output file,
+    then show the interactive view."""
 
     maze: MazeGenerator = MazeGenerator(
         config.width,
@@ -735,7 +796,13 @@ def run(config: Config) -> int:
         raise RuntimeError("No valid path from ENTRY to EXIT")
 
     directions = path_to_directions(path)
-    write_output_file(config.output_file, grid, config.entry, config.exit, directions)
+    write_output_file(
+        config.output_file,
+        grid,
+        config.entry,
+        config.exit,
+        directions,
+    )
 
     # Display the maze in curses.
     try:
