@@ -86,23 +86,26 @@ def parse_coord(value: str, *, key: str) -> Coord:
 def read_config(path: Path) -> Config:
     """Read and validate the configuration file."""
 
-    if not path.exists():
-        raise ConfigError(f"Config file not found: {path}")
-
     raw: Dict[str, str] = {}
-    for line_no, line in enumerate(
-        path.read_text(encoding="utf-8").splitlines(), start=1
-    ):
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            continue
-        if "=" not in stripped:
-            raise ConfigError(
-                f"Bad syntax at line {line_no}: {line!r} (expected KEY=VALUE)"
-            )
-        k, v = stripped.split("=", 1)
-        key = k.strip().upper()
-        raw[key] = v.strip()
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            for line_no, line in enumerate(f, start=1):
+                stripped = line.strip()
+                if not stripped or stripped.startswith("#"):
+                    continue
+                if "=" not in stripped:
+                    raise ConfigError(
+                        f"Bad syntax at\n"
+                        f"line {line_no}: {line!r} (expected KEY=VALUE)"
+                    )
+                k, v = stripped.split("=", 1)
+                key = k.strip().upper()
+                raw[key] = v.strip()
+    except FileNotFoundError as exc:
+        raise ConfigError(f"Config file not found: {path}") from exc
+    except OSError as exc:
+        raise ConfigError(f"Could not read"
+                          f" config file: {path}: {exc}") from exc
 
     required = {"WIDTH", "HEIGHT", "ENTRY", "EXIT", "OUTPUT_FILE", "PERFECT"}
     missing = sorted(required - set(raw.keys()))
@@ -421,7 +424,8 @@ def write_output_file(
     lines.append(directions)
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    with path.open("w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
 
 
 def render_block(
@@ -499,6 +503,7 @@ def curses_view(
 
     show_path = False
     seed: int = config.seed
+    last_error: Optional[str] = None
 
     def safe_draw_maze(
         *,
@@ -580,6 +585,8 @@ def curses_view(
         Optional[List[Coord]],
         str,
     ]:
+        nonlocal last_error
+        last_error = None
         cell_count = config.width * config.height
         draw_every = max(1, cell_count // 250)
         delay_ms = 5 if cell_count <= 900 else 1
@@ -610,41 +617,59 @@ def curses_view(
             except curses.error:
                 return
 
-        maze: MazeGenerator = MazeGenerator(
-            config.width,
-            config.height,
-            seed=seed,
-            perfect=config.perfect,
-            embed_42=True,
-            entry=config.entry,
-            exit_=config.exit,
-            on_step=on_step,
-        )
-        if getattr(maze, "pattern_omitted_reason", None) is not None:
-            print(f"Error: {maze.pattern_omitted_reason}", file=sys.stderr)
-        grid = cast(Grid, maze.grid)
-        validate_maze(
-            grid,
-            entry=config.entry,
-            exit_=config.exit,
-            pattern=getattr(maze, "pattern_cells", None),
-            perfect=config.perfect,
-        )
-        path = solve_bfs(grid, config.entry, config.exit)
-        if path is None:
-            directions = ""
-        else:
-            directions = path_to_directions(path)
-        write_output_file(
-            config.output_file,
-            grid,
-            config.entry,
-            config.exit,
-            directions,
-        )
-        return maze, path, directions
+        try:
+            maze: MazeGenerator = MazeGenerator(
+                config.width,
+                config.height,
+                seed=seed,
+                perfect=config.perfect,
+                embed_42=True,
+                entry=config.entry,
+                exit_=config.exit,
+                on_step=on_step,
+            )
+            if getattr(maze, "pattern_omitted_reason", None) is not None:
+                print(f"Error: {maze.pattern_omitted_reason}", file=sys.stderr)
+            grid = cast(Grid, maze.grid)
+            validate_maze(
+                grid,
+                entry=config.entry,
+                exit_=config.exit,
+                pattern=getattr(maze, "pattern_cells", None),
+                perfect=config.perfect,
+            )
+            path = solve_bfs(grid, config.entry, config.exit)
+            if path is None:
+                directions = ""
+            else:
+                directions = path_to_directions(path)
+            write_output_file(
+                config.output_file,
+                grid,
+                config.entry,
+                config.exit,
+                directions,
+            )
+            return maze, path, directions
+        except Exception as exc:
+            # Keep the UI alive on regeneration; show a message instead.
+            last_error = f"{type(exc).__name__}: {exc}"
+            raise
 
-    maze, path, _directions = generate_new_maze()
+    try:
+        maze, path, _directions = generate_new_maze()
+    except Exception as exc:
+        stdscr.clear()
+        max_y, max_x = stdscr.getmaxyx()
+        msg = f"Error: {type(exc).__name__}: {exc}"
+        try:
+            stdscr.addstr(0, 0, msg[: max(0, max_x - 1)])
+            stdscr.addstr(2, 0, "Press any key to quit."[: max(0, max_x - 1)])
+        except curses.error:
+            pass
+        stdscr.refresh()
+        stdscr.getch()
+        return
 
     def to_canvas(c: Coord) -> Tuple[int, int]:
         return (2 * c[0] + 1, 2 * c[1] + 1)
@@ -752,13 +777,21 @@ def curses_view(
         safe_addstr(base + 2, 0, "2. Show/hide path from entry to exit")
         safe_addstr(base + 3, 0, "3. Rotate maze colors")
         safe_addstr(base + 4, 0, "4. Quit")
-        safe_addstr(base + 5, 0, "Choice? (1-4): ")
+        if last_error is not None:
+            safe_addstr(base + 5, 0, f"Last error: {last_error}")
+            safe_addstr(base + 6, 0, "Choice? (1-4): ")
+        else:
+            safe_addstr(base + 5, 0, "Choice? (1-4): ")
         stdscr.refresh()
 
         key = stdscr.getch()
         if key == ord("1"):
             seed += 1
-            maze, path, _directions = generate_new_maze()
+            try:
+                maze, path, _directions = generate_new_maze()
+            except Exception:
+                # Error message already stored in last_error.
+                continue
         elif key == ord("2"):
             show_path = not show_path
         elif key == ord("4"):
@@ -827,8 +860,13 @@ def main(argv: Sequence[str]) -> int:
     except KeyboardInterrupt:
         print("Interrupted.", file=sys.stderr)
         return 130
-    except (ConfigError, OSError, RuntimeError) as exec:
-        print(f"Error: {exec}", file=sys.stderr)
+    except (ConfigError, OSError, RuntimeError) as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        # Avoid tracebacks during review; keep output concise.
+        print(f"Unexpected error: "
+              f"{type(exc).__name__}: {exc}", file=sys.stderr)
         return 1
 
 
