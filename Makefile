@@ -2,10 +2,6 @@ PY=python3
 CONFIG?=config.txt
 VENV?=.venv
 PIP=$(VENV)/bin/pip
-FLAKE8=$(VENV)/bin/flake8
-MYPY=$(VENV)/bin/mypy
-
-.PHONY: install run debug clean lint lint-strict
 
 install:
 	$(PY) -m venv $(VENV)
@@ -23,6 +19,11 @@ clean:
 	find . -name '*.pyc' -delete
 
 lint:
-	$(FLAKE8) .
-	$(MYPY) . --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs
+	PATH="$(VENV)/bin:$$PATH" flake8 .
+	PATH="$(VENV)/bin:$$PATH" mypy . --warn-return-any --warn-unused-ignores --ignore-missing-imports --disallow-untyped-defs --check-untyped-defs
 
+lint-strict:
+	PATH="$(VENV)/bin:$$PATH" flake8 .
+	PATH="$(VENV)/bin:$$PATH" mypy . --strict
+
+.PHONY: install run debug clean lint lint-strict
