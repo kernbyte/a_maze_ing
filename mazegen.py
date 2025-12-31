@@ -17,7 +17,7 @@ has a `walls` mapping with keys: "N", "E", "S", "W" where True means closed.
 from collections import deque
 from dataclasses import dataclass
 import random
-from typing import Deque, Dict, List, Mapping, Optional, Set, Tuple
+from typing import Callable, Deque, Dict, List, Mapping, Optional, Set, Tuple
 
 
 Coord = Tuple[int, int]  # (row, col)
@@ -60,6 +60,7 @@ class MazeGenerator:
     grid: List[List[Cell]]
     pattern_cells: Set[Coord]
     pattern_omitted_reason: Optional[str]
+    _on_step: Optional[Callable[["MazeGenerator"], None]]
 
     def __init__(
         self,
@@ -71,6 +72,7 @@ class MazeGenerator:
         embed_42: bool = True,
         entry: Optional[Coord] = None,
         exit_: Optional[Coord] = None,
+        on_step: Optional[Callable[["MazeGenerator"], None]] = None,
     ) -> None:
         self.width = width
         self.height = height
@@ -79,6 +81,7 @@ class MazeGenerator:
         self.grid = [[Cell(r, c) for c in range(width)] for r in range(height)]
         self.pattern_cells = set()
         self.pattern_omitted_reason = None
+        self._on_step = on_step
 
         if embed_42:
             try:
@@ -95,6 +98,9 @@ class MazeGenerator:
 
         if not perfect:
             self._add_cycles(rng)
+
+        if self._on_step is not None:
+            self._on_step(self)
 
     def _add_cycles(self, rng: random.Random) -> None:
         """Optionally add extra openings to create multiple paths.
@@ -152,6 +158,9 @@ class MazeGenerator:
             self.grid[br][bc].walls["W"] = False
         else:
             raise ValueError("Cells are not adjacent")
+
+        if self._on_step is not None:
+            self._on_step(self)
 
     def _find_start_cell(self) -> Optional[Coord]:
         for r in range(self.height):

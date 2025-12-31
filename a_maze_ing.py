@@ -466,6 +466,48 @@ def curses_view(
     show_path = False
     seed: int = config.seed
 
+    def safe_draw_maze(
+        *,
+        maze: MazeGenerator,
+        wall_attr: int,
+        pattern_attr: int,
+        bg_attr: int,
+    ) -> None:
+        lines = render_block(cast(Grid, maze.grid), pattern=getattr(maze, "pattern_cells", None))
+        max_y, max_x = stdscr.getmaxyx()
+        needed_y = len(lines)
+        needed_x = max((len(line) for line in lines), default=0)
+
+        if needed_y > max_y or needed_x > max_x:
+            return
+
+        try:
+            stdscr.bkgd(" ", bg_attr)
+        except curses.error:
+            pass
+
+        pattern_tiles: Set[Tuple[int, int]] = set()
+        pattern_cells = getattr(maze, "pattern_cells", None)
+        if pattern_cells is not None:
+            for cell in pattern_cells:
+                pattern_tiles.add((2 * cell[0] + 1, 2 * cell[1] + 1))
+
+        for i, line in enumerate(lines):
+            for j, ch_char in enumerate(line):
+                if i >= max_y or j >= max_x:
+                    continue
+                try:
+                    if (i, j) in pattern_tiles:
+                        stdscr.addch(i, j, " ", pattern_attr)
+                    elif ch_char == WALL_CHAR:
+                        stdscr.addch(i, j, ch_char, wall_attr)
+                    else:
+                        stdscr.addch(i, j, ch_char)
+                except curses.error:
+                    continue
+
+        stdscr.refresh()
+
     def init_pairs() -> Tuple[int, int, int, int]:
         wall_color_idx
         wall_foreground = wall_colors[wall_color_idx % len(wall_colors)]
@@ -490,6 +532,36 @@ def curses_view(
         )
 
     def generate_new_maze() -> Tuple[MazeGenerator, Optional[List[Coord]], str]:
+        cell_count = config.width * config.height
+        draw_every = max(1, cell_count // 250)
+        delay_ms = 5 if cell_count <= 900 else 1
+        step_count = 0
+
+        if curses.has_colors():
+            wall_attr, _path_attr, _entry_attr, _exit_attr = init_pairs()
+            pattern_attr = curses.color_pair(5)
+            bg_attr = curses.color_pair(6)
+        else:
+            wall_attr = 0
+            pattern_attr = 0
+            bg_attr = 0
+
+        def on_step(m: MazeGenerator) -> None:
+            nonlocal step_count
+            step_count += 1
+            if step_count % draw_every != 0:
+                return
+            safe_draw_maze(
+                maze=m,
+                wall_attr=wall_attr,
+                pattern_attr=pattern_attr,
+                bg_attr=bg_attr,
+            )
+            try:
+                curses.napms(delay_ms)
+            except curses.error:
+                return
+
         maze: MazeGenerator = MazeGenerator(
             config.width,
             config.height,
@@ -498,6 +570,7 @@ def curses_view(
             embed_42=True,
             entry=config.entry,
             exit_=config.exit,
+            on_step=on_step,
         )
         if getattr(maze, "pattern_omitted_reason", None) is not None:
             print(f"Error: {maze.pattern_omitted_reason}", file=sys.stderr)
@@ -612,8 +685,7 @@ def curses_view(
                         safe_addch(i, j, " ", path_attr)
                     else:
                         safe_addch(i, j, ch_char)
-
-        # Menu (like the PDF screenshot)
+        # Draw menu
         base = len(lines)
         safe_addstr(base + 0, 0, "=== A-Maze-ing ===")
         safe_addstr(base + 1, 0, "1. Re-generate a new maze")
