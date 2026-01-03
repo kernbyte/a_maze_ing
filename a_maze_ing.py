@@ -4,6 +4,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 from mazegen import MazeGenerator
+from parsing import parse_config as parse_config_dict
+from hexa_writer import convert_to_hex
 from typing import (
     Any,
     Deque,
@@ -45,106 +47,44 @@ class ConfigError(ValueError):
     pass
 
 
-def parse_bool(value: str) -> bool:
-    """Parse a boolean from a config value."""
-
-    v = value.strip().lower()
-    if v in {"true", "1", "yes", "y", "on"}:
-        return True
-    if v in {"false", "0", "no", "n", "off"}:
-        return False
-    raise ConfigError(f"Invalid boolean: {value!r}")
-
-
-def parse_int(value: str, *, key: str) -> int:
-    """Parse an integer from a config value."""
-
-    try:
-        return int(value.strip())
-    except ValueError as exc:
-        msg = f"Invalid integer for {key}: {value!r}"
-        raise ConfigError(msg) from exc
-
-
-def parse_coord(value: str, *, key: str) -> Coord:
-    """Parse coordinates as (x,y) and return internal (row,col).
-
-    The subject uses coordinates (x,y) where x is a column (0..WIDTH-1)
-    and y is a row (0..HEIGHT-1). Internally, this project uses (row,col).
-    """
-
-    parts = [p.strip() for p in value.split(",")]
-    if len(parts) != 2:
-        raise ConfigError(
-            f"Invalid coordinate for {key}: {value!r} (expected 'x,y')"
-        )
-    x = parse_int(parts[0], key=key)
-    y = parse_int(parts[1], key=key)
-    return (y, x)
-
-
 def read_config(path: Path) -> Config:
-    """Read and validate the configuration file."""
+    """Read and validate the configuration file.
 
-    raw: Dict[str, str] = {}
+    Uses parsing.parse_config and adapts the result to Config.
+    """
     try:
-        with path.open("r", encoding="utf-8") as f:
-            for line_no, line in enumerate(f, start=1):
-                stripped = line.strip()
-                if not stripped or stripped.startswith("#"):
-                    continue
-                if "=" not in stripped:
-                    raise ConfigError(
-                        f"Bad syntax at\n"
-                        f"line {line_no}: {line!r} (expected KEY=VALUE)"
-                    )
-                k, v = stripped.split("=", 1)
-                key = k.strip().upper()
-                raw[key] = v.strip()
-    except FileNotFoundError as exc:
-        raise ConfigError(f"Config file not found: {path}") from exc
-    except OSError as exc:
-        raise ConfigError(f"Could not read"
-                          f" config file: {path}: {exc}") from exc
+        raw = parse_config_dict(str(path))
+    except Exception as exc:
+        raise ConfigError(f"Failed to parse config: {exc}") from exc
+    if not raw:
+        raise ConfigError("Config parsing failed")
+    try:
+        width = raw["WIDTH"]
+        height = raw["HEIGHT"]
+        # parse_config returns (x, y) format; convert to (row, col)
+        entry_x, entry_y = raw["ENTRY"]
+        exit_x, exit_y = raw["EXIT"]
+        entry = (entry_y, entry_x)  # (row, col)
+        exit_ = (exit_y, exit_x)    # (row, col)
+        output_file = Path(raw["OUTPUT_FILE"]).expanduser()
+        perfect_str = raw["PERFECT"]
+        perfect = perfect_str.lower() in {"true", "1", "yes"}
+        seed = raw.get("SEED", 0)
 
-    required = {"WIDTH", "HEIGHT", "ENTRY", "EXIT", "OUTPUT_FILE", "PERFECT"}
-    missing = sorted(required - set(raw.keys()))
-    if missing:
-        raise ConfigError(
-            f"Missing required config keys: {', '.join(missing)}"
+        if entry == exit_:
+            raise ConfigError("ENTRY and EXIT must be different")
+
+        return Config(
+            width=width,
+            height=height,
+            entry=entry,
+            exit=exit_,
+            output_file=output_file,
+            perfect=perfect,
+            seed=seed,
         )
-
-    width = parse_int(raw["WIDTH"], key="WIDTH")
-    height = parse_int(raw["HEIGHT"], key="HEIGHT")
-    entry = parse_coord(raw["ENTRY"], key="ENTRY")
-    exit_ = parse_coord(raw["EXIT"], key="EXIT")
-    output_file = Path(raw["OUTPUT_FILE"]).expanduser()
-    perfect = parse_bool(raw["PERFECT"])
-
-    seed = parse_int(raw.get("SEED", "0"), key="SEED")
-
-    if width <= 0 or height <= 0:
-        raise ConfigError("WIDTH and HEIGHT must be > 0")
-
-    if entry == exit_:
-        raise ConfigError("ENTRY and EXIT must be different")
-
-    ex, ey = entry
-    gx, gy = exit_
-    if not (0 <= ex < height and 0 <= ey < width):
-        raise ConfigError("ENTRY is outside maze bounds")
-    if not (0 <= gx < height and 0 <= gy < width):
-        raise ConfigError("EXIT is outside maze bounds")
-
-    return Config(
-        width=width,
-        height=height,
-        entry=entry,
-        exit=exit_,
-        output_file=output_file,
-        perfect=perfect,
-        seed=seed,
-    )
+    except KeyError as exc:
+        raise ConfigError(f"Missing config key: {exc}") from exc
 
 
 class _HasWalls(Protocol):
@@ -230,8 +170,7 @@ def validate_maze(
                 east = grid[r][c + 1]
                 if cell.walls["E"] != east.walls["W"]:
                     raise RuntimeError("Invalid maze: incoherent E/W walls")
-
-    # Connectivity: all non-pattern cells must be reachable from entry.
+    # Full connectivity over non-pattern cells.
     if solve_bfs(grid, entry, exit_) is None:
         raise RuntimeError("Invalid maze: no path from ENTRY to EXIT")
 
@@ -413,19 +352,16 @@ def write_output_file(
 ) -> None:
     """Write the maze output file following the subject format."""
 
-    lines: List[str] = []
-    for row in grid:
-        lines.append("".join(cell_to_hex(c) for c in row))
-
-    lines.append("")
-    # Subject format expects (x,y) == (col,row)
-    lines.append(f"{entry[1]},{entry[0]}")
-    lines.append(f"{exit_[1]},{exit_[0]}")
-    lines.append(directions)
-
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+
+    # Use hexa_writer to write the hex grid
+    convert_to_hex(cast(list[list[Any]], grid), str(path))
+
+    # Append entry, exit, and directions to the file
+    with path.open("a", encoding="utf-8") as f:
+        f.write(f"\n{entry[1]},{entry[0]}\n")
+        f.write(f"{exit_[1]},{exit_[0]}\n")
+        f.write(f"{directions}\n")
 
 
 def render_block(
@@ -511,6 +447,7 @@ def curses_view(
         wall_attr: int,
         pattern_attr: int,
         bg_attr: int,
+        animate: bool = False,
     ) -> None:
         lines = render_block(
             cast(Grid, maze.grid),
@@ -548,10 +485,23 @@ def curses_view(
                 except curses.error:
                     continue
 
-        stdscr.refresh()
+            if animate:
+                # Lightweight "reveal" animation: refresh as we draw rows.
+                stdscr.refresh()
+                try:
+                    # Keep the total animation time reasonable.
+                    delay_ms = 0
+                    if needed_y > 0:
+                        delay_ms = max(0, min(10, 350 // needed_y))
+                    if delay_ms:
+                        curses.napms(delay_ms)
+                except curses.error:
+                    pass
+
+        if not animate:
+            stdscr.refresh()
 
     def init_pairs() -> Tuple[int, int, int, int]:
-        wall_color_idx
         wall_foreground = wall_colors[wall_color_idx % len(wall_colors)]
         try:
             # 1: walls
@@ -587,10 +537,6 @@ def curses_view(
     ]:
         nonlocal last_error
         last_error = None
-        cell_count = config.width * config.height
-        draw_every = max(1, cell_count // 250)
-        delay_ms = 5 if cell_count <= 900 else 1
-        step_count = 0
 
         if curses.has_colors():
             wall_attr, _path_attr, _entry_attr, _exit_attr = init_pairs()
@@ -601,35 +547,20 @@ def curses_view(
             pattern_attr = 0
             bg_attr = 0
 
-        def on_step(m: MazeGenerator) -> None:
-            nonlocal step_count
-            step_count += 1
-            if step_count % draw_every != 0:
-                return
-            safe_draw_maze(
-                maze=m,
-                wall_attr=wall_attr,
-                pattern_attr=pattern_attr,
-                bg_attr=bg_attr,
-            )
-            try:
-                curses.napms(delay_ms)
-            except curses.error:
-                return
-
         try:
             maze: MazeGenerator = MazeGenerator(
                 config.width,
                 config.height,
-                seed=seed,
-                perfect=config.perfect,
-                embed_42=True,
                 entry=config.entry,
                 exit_=config.exit,
-                on_step=on_step,
+                seed=seed,
+                perfect=config.perfect,
             )
-            if getattr(maze, "pattern_omitted_reason", None) is not None:
-                print(f"Error: {maze.pattern_omitted_reason}", file=sys.stderr)
+            pattern_omitted_reason: Optional[str] = getattr(
+                maze, "pattern_omitted_reason", None
+            )
+            if pattern_omitted_reason is not None:
+                print(f"Error: {pattern_omitted_reason}", file=sys.stderr)
             grid = cast(Grid, maze.grid)
             validate_maze(
                 grid,
@@ -637,6 +568,13 @@ def curses_view(
                 exit_=config.exit,
                 pattern=getattr(maze, "pattern_cells", None),
                 perfect=config.perfect,
+            )
+            safe_draw_maze(
+                maze=maze,
+                wall_attr=wall_attr,
+                pattern_attr=pattern_attr,
+                bg_attr=bg_attr,
+                animate=True,
             )
             path = solve_bfs(grid, config.entry, config.exit)
             if path is None:
@@ -809,12 +747,14 @@ def run(config: Config) -> int:
         config.height,
         seed=config.seed,
         perfect=config.perfect,
-        embed_42=True,
         entry=config.entry,
         exit_=config.exit,
     )
-    if getattr(maze, "pattern_omitted_reason", None) is not None:
-        print(f"Error: {maze.pattern_omitted_reason}", file=sys.stderr)
+    pattern_omitted_reason: Optional[str] = getattr(
+        maze, "pattern_omitted_reason", None
+    )
+    if pattern_omitted_reason is not None:
+        print(f"Error: {pattern_omitted_reason}", file=sys.stderr)
 
     grid = cast(Grid, maze.grid)
     validate_maze(

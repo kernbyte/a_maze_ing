@@ -1,7 +1,10 @@
-*This project has been created as part of the 42 curriculum by <hchiar>[, <aminel-h>].*
+
+*This project has been created as part of the 42 curriculum by hchiar, aminel-h.*
 
 ## Description
+
 A-Maze-ing is a Python maze generator that:
+
 - Reads a `KEY=VALUE` configuration file
 - Generates a random maze (optionally perfect)
 - Embeds a visible “42” pattern using fully closed cells (omitted with an error message if the maze is too small)
@@ -60,7 +63,14 @@ Building the reusable package:
 - `python3 -m pip install build`
 - `python3 -m build`
 
+## Roles
+
+- aminel-h Maze generation and algo research
+- hchiar Display and handling parsing
+
 ## Resources
+
+- Python Packaging User Guide
 - Python `curses` module documentation
-- Graph theory / BFS (shortest path)
-- Maze generation: recursive backtracker
+- Maze generation: Recursive DFS backtracker
+- Maze generating theory `https://www.youtube.com/watch?v=uctN47p_KVk&start=623`

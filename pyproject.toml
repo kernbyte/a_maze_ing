@@ -8,6 +8,9 @@ version = "1.0.0"
 description = "Reusable maze generator module for the A-Maze-ing project"
 readme = "README.md"
 requires-python = ">=3.10"
+authors = [
+    {name = "hchiar, aminel-h"}
+]
 
 [tool.setuptools]
 py-modules = ["mazegen"]
